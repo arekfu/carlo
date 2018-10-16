@@ -9,6 +9,7 @@ use std::thread;
 
 use irc::client::prelude::{IrcClient, Client, ClientExt, Command};
 use irc::proto::message::Message;
+use irc::proto::ChannelExt;
 
 #[derive(Debug)]
 pub struct Carlo {
@@ -56,15 +57,9 @@ impl Carlo {
     fn handle_irc(&self, message: &Message) -> Option<Message> {
         let cmd_prefix = self.client.current_nickname().to_string();
         match &message.command {
-            Command::PRIVMSG(_, msg) => {
-                let trimmed = msg.trim_left();
-                if trimmed.starts_with(&cmd_prefix) {
-                    let reply_txt = if msg.contains("uptime") {
-                        format!("uptime = {} seconds",
-                                self.start_time.elapsed().as_secs())
-                    } else {
-                        "beep boop".to_string()
-                    };
+            Command::PRIVMSG(channel, msg) => {
+                if !channel.is_channel_name() || msg.trim_left().starts_with(&cmd_prefix) {
+                    let reply_txt = self.process_msg(&msg);
                     let cmd = Command::PRIVMSG(message.response_target().unwrap().to_string(), reply_txt);
                     let reply = Message::from(cmd);
                     Some(reply)
@@ -73,6 +68,15 @@ impl Carlo {
                 }
             },
             _ => None
+        }
+    }
+
+    fn process_msg(&self, msg: &str) -> String {
+        if msg.contains("uptime") {
+            format!("uptime = {} seconds",
+                    self.start_time.elapsed().as_secs())
+        } else {
+            "beep boop".to_string()
         }
     }
 }
