@@ -59,10 +59,9 @@ impl Carlo {
         match &message.command {
             Command::PRIVMSG(channel, msg) => {
                 if !channel.is_channel_name() || msg.trim_left().starts_with(&cmd_prefix) {
-                    let reply_txt = self.process_msg(&msg);
-                    let cmd = Command::PRIVMSG(message.response_target().unwrap().to_string(), reply_txt);
-                    let reply = Message::from(cmd);
-                    Some(reply)
+                    let reply_to = message.response_target().unwrap().to_string();
+                    let source_nick = message.source_nickname().unwrap_or("");
+                    self.process_msg(&source_nick, &reply_to, &msg)
                 } else {
                     None
                 }
@@ -71,12 +70,26 @@ impl Carlo {
         }
     }
 
-    fn process_msg(&self, msg: &str) -> String {
-        if msg.contains("uptime") {
-            format!("uptime = {} seconds",
-                    self.start_time.elapsed().as_secs())
+    fn process_msg(&self, source_nick: &str, reply_to: &str, incoming: &str) -> Option<Message> {
+        if incoming.contains("uptime") {
+            let reply = format!("uptime = {} seconds", self.start_time.elapsed().as_secs());
+            let cmd = Command::PRIVMSG(reply_to.to_string(), reply);
+            Some(Message::from(cmd))
+        } else if incoming.starts_with("say ") {
+            if !self.client.config().is_owner(source_nick) {
+                return None;
+            }
+            let v: Vec<&str> = incoming[4..].splitn(2, ' ').collect();
+            if v.len() <= 1 {
+                None
+            } else {
+                let chan = v[0].to_string();
+                let reply = v[1].to_string();
+                let cmd = Command::PRIVMSG(chan, reply);
+                Some(Message::from(cmd))
+            }
         } else {
-            "beep boop".to_string()
+            None
         }
     }
 }
