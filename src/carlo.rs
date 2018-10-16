@@ -1,4 +1,6 @@
 use std::time::Instant;
+use std::sync::Arc;
+use irc::client::prelude::{IrcClient, Client, ClientExt, Command};
 
 #[derive(Debug)]
 pub struct Carlo {
@@ -11,11 +13,13 @@ impl Carlo {
     }
 
     pub fn run(&mut self) {
-        use irc::client::prelude::{IrcClient, Client, ClientExt, Command};
 
-        let client = IrcClient::new("config.toml").unwrap();
+        let client = Arc::new(IrcClient::new("config.toml").unwrap());
         client.identify().unwrap();
+        self.dispatch(&*client)
+    }
 
+    fn dispatch(&self, client: &IrcClient) {
         client.for_each_incoming(|irc_msg| {
             let mut cmd_prefix = "@".to_owned();
             cmd_prefix.push_str(client.current_nickname());
