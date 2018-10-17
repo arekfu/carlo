@@ -26,6 +26,7 @@ enum Event {
 
 impl Carlo {
     pub fn new() -> Carlo {
+        debug!("New Carlo instance");
         Carlo {
             start_time: Instant::now(),
             client: Arc::new(IrcClient::new("config.toml").unwrap())
@@ -35,6 +36,7 @@ impl Carlo {
     pub fn run(&mut self) {
         let (tx, rx) = mpsc::channel();
 
+        debug!("Identifying with server");
         self.client.identify().unwrap();
 
         let listener = Listener::new(self.client.clone(), tx);
@@ -42,6 +44,7 @@ impl Carlo {
 
         for event in rx.iter() {
             if let Some(message) = self.handle(&event) {
+                info!("Sending {}", message);
                 self.client.send(message).unwrap();
             }
         }
@@ -49,12 +52,14 @@ impl Carlo {
     }
 
     fn handle(&self, event: &Event) -> Option<Message> {
+        debug!("Handling event {:?}", event);
         match event {
             Event::IncomingIrcMessage(message) => self.handle_irc(message),
         }
     }
 
     fn handle_irc(&self, message: &Message) -> Option<Message> {
+        debug!("Handling Irc message {:?}", message);
         let cmd_prefix = self.client.current_nickname().to_string();
         match &message.command {
             Command::PRIVMSG(channel, msg) => {
@@ -72,23 +77,27 @@ impl Carlo {
 
     fn process_msg(&self, source_nick: &str, reply_to: &str, incoming: &str) -> Option<Message> {
         if incoming.contains("uptime") {
+            info!("\"uptime\" command received from {} on {}", source_nick, reply_to);
             let reply = format!("uptime = {} seconds", self.start_time.elapsed().as_secs());
             let cmd = Command::PRIVMSG(reply_to.to_string(), reply);
             Some(Message::from(cmd))
         } else if incoming.starts_with("say ") {
+            info!("\"say\" command received from {} on {}", source_nick, reply_to);
             if !self.client.config().is_owner(source_nick) {
                 return None;
             }
-            let v: Vec<&str> = incoming[4..].splitn(2, ' ').collect();
+            let v: Vec<&str> = incoming[4..].trim().splitn(2, ' ').collect();
             if v.len() <= 1 {
+                debug!("\"say\" command has no message, not doing anything");
                 None
             } else {
                 let chan = v[0].to_string();
-                let reply = v[1].to_string();
+                let reply = v[1].trim().to_string();
                 let cmd = Command::PRIVMSG(chan, reply);
                 Some(Message::from(cmd))
             }
         } else {
+            debug!("unrecognized command: {}", incoming);
             None
         }
     }
@@ -109,6 +118,7 @@ impl Listener {
 
     fn listen(&self) {
         self.client.for_each_incoming(|irc_msg| {
+            debug!("Listener: sending to master thread: {:?}", irc_msg);
             self.tx.send(Event::IncomingIrcMessage(irc_msg)).unwrap();
         }).unwrap();
     }
