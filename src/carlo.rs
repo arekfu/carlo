@@ -59,23 +59,24 @@ impl Carlo {
         }
 
         rx.iter().for_each(|event| {
-            if let Some(message) = self.handle(&event) {
+            let mut events = self.handle(&event);
+            events.drain(..).for_each(|message| {
                 info!("Sending {}", message);
                 self.client.send(message).unwrap();
-            }
+            });
         });
         handles.drain(..).for_each(|handle| handle.join().unwrap());
     }
 
-    fn handle(&self, event: &Event) -> Option<Message> {
+    fn handle(&self, event: &Event) -> Vec<Message> {
         debug!("Handling event {:?}", event);
         match event {
             Event::IncomingIrcMessage(message) => self.handle_irc(message),
-            Event::UpdatedJob(_) => None,
+            Event::UpdatedJob(_) => Vec::new(),
         }
     }
 
-    fn handle_irc(&self, message: &Message) -> Option<Message> {
+    fn handle_irc(&self, message: &Message) -> Vec<Message> {
         debug!("Handling Irc message {:?}", message);
         let cmd_prefix = self.client.current_nickname().to_string();
         match &message.command {
@@ -85,37 +86,38 @@ impl Carlo {
                     let source_nick = message.source_nickname().unwrap_or("");
                     self.process_msg(&source_nick, &reply_to, &msg)
                 } else {
-                    None
+                    Vec::new()
                 }
             },
-            _ => None
+            _ => Vec::new()
         }
     }
 
-    fn process_msg(&self, source_nick: &str, reply_to: &str, incoming: &str) -> Option<Message> {
+    fn process_msg(&self, source_nick: &str, reply_to: &str, incoming: &str) -> Vec<Message> {
+        let mut replies = Vec::new();
         if incoming.contains("uptime") {
             info!("\"uptime\" command received from {} on {}", source_nick, reply_to);
             let reply = format!("uptime = {} seconds", self.start_time.elapsed().as_secs());
             let cmd = Command::PRIVMSG(reply_to.to_string(), reply);
-            Some(Message::from(cmd))
+            replies.push(Message::from(cmd))
         } else if incoming.starts_with("say ") {
             info!("\"say\" command received from {} on {}", source_nick, reply_to);
             if !self.client.config().is_owner(source_nick) {
-                return None;
+                return replies;
             }
             let v: Vec<&str> = incoming[4..].trim().splitn(2, ' ').collect();
             if v.len() <= 1 {
                 debug!("\"say\" command has no message, not doing anything");
-                None
+                return replies;
             } else {
                 let chan = v[0].to_string();
                 let reply = v[1].trim().to_string();
                 let cmd = Command::PRIVMSG(chan, reply);
-                Some(Message::from(cmd))
+                replies.push(Message::from(cmd))
             }
         } else {
             debug!("unrecognized command: {}", incoming);
-            None
         }
+        replies
     }
 }
