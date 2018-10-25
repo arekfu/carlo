@@ -3,6 +3,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::collections::HashMap;
 use std::fmt;
+use std::cmp::Ordering;
 
 use reqwest::{Client, Error};
 
@@ -100,11 +101,14 @@ impl JListener {
                 let new_timestamp = job.last_build.timestamp;
                 match self.most_recent.insert(job.name.clone(), new_timestamp) {
                     Some(old_timestamp) => {
-                        if old_timestamp < new_timestamp {
-                            events.push(Event::UpdatedJob(job));
-                        } else {
-                            warn!("Job {} went back in time from timestamp {} to {}",
-                                  job.name, old_timestamp, new_timestamp);
+                        match old_timestamp.cmp(&new_timestamp) {
+                            Ordering::Less => {
+                                info!("Job {} has a new build", job.name);
+                                events.push(Event::UpdatedJob(job));
+                            },
+                            Ordering::Equal => debug!("Job {} was not updated", job.name),
+                            Ordering::Greater => warn!("Job {} went back in time from timestamp {} to {}",
+                                                       job.name, old_timestamp, new_timestamp)
                         }
                     },
                     None => ()
