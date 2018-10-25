@@ -11,7 +11,7 @@ use carlo::Event;
 use config::{Config, JenkinsConfig};
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
-pub struct BuildName(String);
+pub struct BuildName(pub String);
 
 impl fmt::Display for BuildName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -21,7 +21,7 @@ impl fmt::Display for BuildName {
 
 
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct BuildTimestamp(u64);
+pub struct BuildTimestamp(pub u64);
 
 impl fmt::Display for BuildTimestamp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -30,7 +30,7 @@ impl fmt::Display for BuildTimestamp {
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct BuildNumber(u32);
+pub struct BuildNumber(pub u32);
 
 impl fmt::Display for BuildNumber {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -40,16 +40,16 @@ impl fmt::Display for BuildNumber {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct JBuild {
-    result: String,
-    timestamp: BuildTimestamp,
-    number: BuildNumber,
+    pub result: Option<String>,
+    pub timestamp: BuildTimestamp,
+    pub number: BuildNumber,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct JJob {
-    name: BuildName,
-    last_build: JBuild,
+    pub name: BuildName,
+    pub last_build: JBuild,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -63,7 +63,7 @@ struct JJson {
 #[derive(Debug)]
 pub struct JListener {
     tx: Sender<Event>,
-    most_recent: HashMap<BuildName, BuildTimestamp>
+    most_recent: HashMap<(String, BuildName), BuildTimestamp>
 }
 
 impl JListener {
@@ -83,74 +83,75 @@ impl JListener {
         response.json()
     }
 
-    fn remove_builds_except(&mut self, build_names: &Vec<&BuildName>) {
-        self.most_recent.retain(|ref name, ref mut _val| build_names.iter().any(|key| key == name));
+    fn prune_builds_except(&mut self, build_keys: &Vec<(&str, &BuildName)>) {
+        info!("Will keep {} builds", build_keys.len());
+        fn in_build_keys(key: &(String, BuildName), build_keys: &Vec<(&str, &BuildName)>) -> bool {
+            build_keys.iter().any(|build_key| key.0 == build_key.0 && key.1 == *build_key.1)
+        }
+        self.most_recent.retain(|ref key, ref mut _val| in_build_keys(*key, build_keys));
+        info!("Builds kept after prune_missing_builds(): {}", self.most_recent.len());
     }
 
-    fn remove_missing_builds(&mut self, job_vec: &Vec<JJob>) {
-        let mut build_names = Vec::new() as Vec<&BuildName>;
-        job_vec.iter().for_each(|ref job| build_names.push(&job.name));
-        self.remove_builds_except(&build_names);
+    fn prune_missing_builds(&mut self, job_vec: &Vec<JJob>, j_config: &JenkinsConfig) {
+        let mut build_keys = Vec::new() as Vec<(&str, &BuildName)>;
+        job_vec.iter().for_each(|ref job| build_keys.push((&j_config.server, &job.name)));
+        self.prune_builds_except(&build_keys);
     }
 
-    fn update_builds(&mut self, mut job_vec: Vec<JJob>) -> Vec<Event> {
+    fn update_builds(&mut self, mut job_vec: Vec<JJob>, j_config: &JenkinsConfig) -> Vec<Event> {
         let mut events = Vec::new();
         job_vec
             .drain(..)
             .for_each(|job| {
-                let new_timestamp = job.last_build.timestamp;
-                match self.most_recent.insert(job.name.clone(), new_timestamp) {
-                    Some(old_timestamp) => {
-                        match old_timestamp.cmp(&new_timestamp) {
-                            Ordering::Less => {
-                                info!("Job {} has a new build", job.name);
-                                events.push(Event::UpdatedJob(job));
-                            },
-                            Ordering::Equal => debug!("Job {} was not updated", job.name),
-                            Ordering::Greater => warn!("Job {} went back in time from timestamp {} to {}",
-                                                       job.name, old_timestamp, new_timestamp)
-                        }
+                match job.last_build.result {
+                    None => {
+                        info!("Job {} has a new build, but it is not complete yet", job.name);
+                        ()
                     },
-                    None => ()
+                    Some(result) => {
+                        let new_timestamp = job.last_build.timestamp;
+                        match self.most_recent.insert((j_config.server.clone(), job.name.clone()), new_timestamp) {
+                            Some(old_timestamp) => {
+                                match old_timestamp.cmp(&new_timestamp) {
+                                    Ordering::Less => {
+                                        info!("Job {} has a new build", job.name);
+                                        events.push(Event::UpdatedJob(j_config.server.clone(), job.name.clone(), result.clone(), j_config.notify.clone()));
+                                    },
+                                    Ordering::Equal => info!("Job {} was not updated", job.name),
+                                    Ordering::Greater => warn!("Job {} went back in time from timestamp {} to {}",
+                                                               job.name, old_timestamp, new_timestamp)
+                                }
+                            },
+                            None => ()
+                        }
+                    }
                 }
             });
-        debug!("{:?}", self.most_recent);
-        job_vec.iter().for_each(|job| {
-            match self.most_recent.get(&job.name) {
-                Some(timestamp) => {
-                    if *timestamp < job.last_build.timestamp {
-                        events.push(Event::UpdatedJob(job.clone()));
-                    }
-                },
-                None => ()
-            }
-        });
         events
     }
 
-    fn update(&mut self, job_vec: Vec<JJob>) -> Vec<Event> {
-        self.remove_missing_builds(&job_vec);
-        self.update_builds(job_vec)
+    fn update(&mut self, job_vec: Vec<JJob>, j_config: &JenkinsConfig) -> Vec<Event> {
+        self.prune_missing_builds(&job_vec, j_config);
+        info!("Updating with jobs: {:?}", job_vec);
+        self.update_builds(job_vec, j_config)
     }
 
     pub fn listen(&mut self, config: Config) {
         let client = Client::new();
-        let mut n_failures = 0 as u32;
         loop {
             for j_config in config.job.iter() {
                 match self.attempt(&client, &j_config) {
                     Ok(json) => {
-                        n_failures = 0;
                         let job_vec = json.jobs.0;
-                        let mut events = self.update(job_vec);
+                        let mut events = self.update(job_vec, &j_config);
                         events.drain(..).for_each(|event| {
+                            info!("Sending event: {:?}", event);
                             self.tx.send(event).unwrap();
                         });
                     },
                     Err(err) => {
-                        n_failures += 1;
-                        error!("Request to {}@{} failed with message {}; {} failed attempts failed so far",
-                               j_config.user, j_config.server, err, n_failures);
+                        error!("Request to {}@{} failed with message {}",
+                               j_config.user, j_config.server, err);
                     }
                 }
             }

@@ -14,6 +14,7 @@ pub struct JenkinsConfig {
     pub server: String,
     pub user: String,
     pub token: String,
+    pub notify: Vec<String>,
 }
 
 impl Config {

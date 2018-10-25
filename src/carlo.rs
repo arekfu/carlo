@@ -12,7 +12,7 @@ use irc::proto::ChannelExt;
 
 use config::Config;
 use irc_listener::IrcListener;
-use j_listener::{JListener, JJob};
+use j_listener::{JListener, BuildName};
 
 #[derive(Debug)]
 pub struct Carlo {
@@ -25,7 +25,7 @@ pub struct Carlo {
 #[derive(Debug)]
 pub enum Event {
     IncomingIrcMessage(Message),
-    UpdatedJob(JJob),
+    UpdatedJob(String, BuildName, String, Vec<String>),
 }
 
 
@@ -59,8 +59,8 @@ impl Carlo {
         }
 
         rx.iter().for_each(|event| {
-            let mut events = self.handle(&event);
-            events.drain(..).for_each(|message| {
+            let mut messages = self.handle(event);
+            messages.drain(..).for_each(|message| {
                 info!("Sending {}", message);
                 self.client.send(message).unwrap();
             });
@@ -68,15 +68,15 @@ impl Carlo {
         handles.drain(..).for_each(|handle| handle.join().unwrap());
     }
 
-    fn handle(&self, event: &Event) -> Vec<Message> {
+    fn handle(&self, event: Event) -> Vec<Message> {
         debug!("Handling event {:?}", event);
         match event {
             Event::IncomingIrcMessage(message) => self.handle_irc(message),
-            Event::UpdatedJob(_) => Vec::new(),
+            Event::UpdatedJob(server, name, result, notify) => self.handle_updated_job(server, name, result, notify)
         }
     }
 
-    fn handle_irc(&self, message: &Message) -> Vec<Message> {
+    fn handle_irc(&self, message: Message) -> Vec<Message> {
         debug!("Handling Irc message {:?}", message);
         let cmd_prefix = self.client.current_nickname().to_string();
         match &message.command {
@@ -93,31 +93,40 @@ impl Carlo {
         }
     }
 
+    fn handle_updated_job(&self, server: String, name: BuildName, result: String, mut notify: Vec<String>) -> Vec<Message> {
+        debug!("Handling Job update {:?}:{:?}:{:?}:{:?}", server, name, result, notify);
+        notify.drain(..).map(|dest| {
+            let reply = format!("New build for job '{}' on '{}'! Result: {}",
+                                name, server, result);
+            let cmd = Command::PRIVMSG(dest, reply);
+            Message::from(cmd)
+        }).collect()
+    }
+
     fn process_msg(&self, source_nick: &str, reply_to: &str, incoming: &str) -> Vec<Message> {
-        let mut replies = Vec::new();
         if incoming.contains("uptime") {
             info!("\"uptime\" command received from {} on {}", source_nick, reply_to);
             let reply = format!("uptime = {} seconds", self.start_time.elapsed().as_secs());
             let cmd = Command::PRIVMSG(reply_to.to_string(), reply);
-            replies.push(Message::from(cmd))
+            return vec![Message::from(cmd)];
         } else if incoming.starts_with("say ") {
             info!("\"say\" command received from {} on {}", source_nick, reply_to);
             if !self.client.config().is_owner(source_nick) {
-                return replies;
+                return Vec::new();
             }
             let v: Vec<&str> = incoming[4..].trim().splitn(2, ' ').collect();
             if v.len() <= 1 {
                 debug!("\"say\" command has no message, not doing anything");
-                return replies;
+                return Vec::new();
             } else {
                 let chan = v[0].to_string();
                 let reply = v[1].trim().to_string();
                 let cmd = Command::PRIVMSG(chan, reply);
-                replies.push(Message::from(cmd))
+                return vec![Message::from(cmd)]
             }
         } else {
             debug!("unrecognized command: {}", incoming);
         }
-        replies
+        Vec::new()
     }
 }
