@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use std::sync::mpsc::Sender;
 use std::sync::mpsc;
 
 use std::sync::Arc;
@@ -11,16 +10,22 @@ use irc::client::prelude::{IrcClient, Client, ClientExt, Command};
 use irc::proto::message::Message;
 use irc::proto::ChannelExt;
 
+use config::Config;
+use irc_listener::IrcListener;
+use j_listener::{JListener, JJob};
+
 #[derive(Debug)]
 pub struct Carlo {
     start_time: Instant,
-    client: Arc<IrcClient>
+    client: Arc<IrcClient>,
+    jenkins_config: Option<Config>,
 }
 
 
 #[derive(Debug)]
-enum Event {
+pub enum Event {
     IncomingIrcMessage(Message),
+    UpdatedJob(JJob),
 }
 
 
@@ -29,7 +34,10 @@ impl Carlo {
         debug!("New Carlo instance");
         Carlo {
             start_time: Instant::now(),
-            client: Arc::new(IrcClient::new("config.toml").unwrap())
+            client: Arc::new(IrcClient::new("irc.toml").expect("Could not find irc.toml file")),
+            jenkins_config: Config::from_file("jenkins.toml")
+                .map_err(|err| warn!("Config could not be read: {}", err))
+                .ok()
         }
     }
 
@@ -39,22 +47,31 @@ impl Carlo {
         debug!("Identifying with server");
         self.client.identify().unwrap();
 
-        let listener = Listener::new(self.client.clone(), tx);
-        let hlisten = thread::spawn(move || { listener.listen() });
+        let mut handles = Vec::new();
 
-        for event in rx.iter() {
+        let irclistener = IrcListener::new(self.client.clone(), tx.clone());
+
+        handles.push(thread::spawn(move || { irclistener.listen() }));
+
+        if let Some(config) = self.jenkins_config.take() {
+            let mut jlistener = JListener::new(tx.clone());
+            handles.push(thread::spawn(move || { jlistener.listen(config) }));
+        }
+
+        rx.iter().for_each(|event| {
             if let Some(message) = self.handle(&event) {
                 info!("Sending {}", message);
                 self.client.send(message).unwrap();
             }
-        }
-        hlisten.join().unwrap();
+        });
+        handles.drain(..).for_each(|handle| handle.join().unwrap());
     }
 
     fn handle(&self, event: &Event) -> Option<Message> {
         debug!("Handling event {:?}", event);
         match event {
             Event::IncomingIrcMessage(message) => self.handle_irc(message),
+            Event::UpdatedJob(_) => None,
         }
     }
 
@@ -100,26 +117,5 @@ impl Carlo {
             debug!("unrecognized command: {}", incoming);
             None
         }
-    }
-}
-
-
-
-#[derive(Debug)]
-struct Listener {
-    client: Arc<IrcClient>,
-    tx: Sender<Event>,
-}
-
-impl Listener {
-    fn new(client: Arc<IrcClient>, tx: Sender<Event>) -> Listener {
-        Listener { client, tx }
-    }
-
-    fn listen(&self) {
-        self.client.for_each_incoming(|irc_msg| {
-            debug!("Listener: sending to master thread: {:?}", irc_msg);
-            self.tx.send(Event::IncomingIrcMessage(irc_msg)).unwrap();
-        }).unwrap();
     }
 }
