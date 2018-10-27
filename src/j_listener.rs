@@ -1,9 +1,9 @@
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::fmt;
 use std::sync::mpsc::Sender;
 use std::thread::sleep;
 use std::time::Duration;
-use std::collections::HashMap;
-use std::fmt;
-use std::cmp::Ordering;
 
 use reqwest::{Client, Error};
 
@@ -18,7 +18,6 @@ impl fmt::Display for BuildName {
         self.0.fmt(f)
     }
 }
-
 
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct BuildTimestamp(pub u64);
@@ -63,7 +62,7 @@ struct JJson {
 #[derive(Debug)]
 pub struct JListener {
     tx: Sender<Event>,
-    most_recent: HashMap<(String, BuildName), BuildTimestamp>
+    most_recent: HashMap<(String, BuildName), BuildTimestamp>,
 }
 
 impl JListener {
@@ -74,10 +73,13 @@ impl JListener {
         }
     }
 
-    fn attempt(&self, client: &Client, j_config: &JenkinsConfig) -> Result<JJson, Error>
-    {
-        info!("Attempting connection to {} as {}", j_config.server, j_config.user);
-        let mut response = client.get(&j_config.server)
+    fn attempt(&self, client: &Client, j_config: &JenkinsConfig) -> Result<JJson, Error> {
+        info!(
+            "Attempting connection to {} as {}",
+            j_config.server, j_config.user
+        );
+        let mut response = client
+            .get(&j_config.server)
             .basic_auth(&j_config.user, Some(&j_config.token))
             .send()?;
         response.json()
@@ -86,15 +88,23 @@ impl JListener {
     fn prune_builds_except(&mut self, build_keys: &Vec<(&str, &BuildName)>) {
         info!("Will keep {} builds", build_keys.len());
         fn in_build_keys(key: &(String, BuildName), build_keys: &Vec<(&str, &BuildName)>) -> bool {
-            build_keys.iter().any(|build_key| key.0 == build_key.0 && key.1 == *build_key.1)
+            build_keys
+                .iter()
+                .any(|build_key| key.0 == build_key.0 && key.1 == *build_key.1)
         }
-        self.most_recent.retain(|ref key, ref mut _val| in_build_keys(*key, build_keys));
-        info!("Builds kept after prune_missing_builds(): {}", self.most_recent.len());
+        self.most_recent
+            .retain(|ref key, ref mut _val| in_build_keys(*key, build_keys));
+        info!(
+            "Builds kept after prune_missing_builds(): {}",
+            self.most_recent.len()
+        );
     }
 
     fn prune_missing_builds(&mut self, job_vec: &Vec<JJob>, j_config: &JenkinsConfig) {
         let mut build_keys = Vec::new() as Vec<(&str, &BuildName)>;
-        job_vec.iter().for_each(|ref job| build_keys.push((&j_config.server, &job.name)));
+        job_vec
+            .iter()
+            .for_each(|ref job| build_keys.push((&j_config.server, &job.name)));
         self.prune_builds_except(&build_keys);
     }
 
@@ -102,28 +112,37 @@ impl JListener {
         let mut events = Vec::new();
         job_vec
             .drain(..)
-            .for_each(|job| {
-                match job.last_build.result {
-                    None => {
-                        info!("Job {} has a new build, but it is not complete yet", job.name);
-                        ()
-                    },
-                    Some(result) => {
-                        let new_timestamp = job.last_build.timestamp;
-                        match self.most_recent.insert((j_config.server.clone(), job.name.clone()), new_timestamp) {
-                            Some(old_timestamp) => {
-                                match old_timestamp.cmp(&new_timestamp) {
-                                    Ordering::Less => {
-                                        info!("Job {} has a new build", job.name);
-                                        events.push(Event::UpdatedJob(j_config.server.clone(), job.name.clone(), result.clone(), j_config.notify.clone()));
-                                    },
-                                    Ordering::Equal => info!("Job {} was not updated", job.name),
-                                    Ordering::Greater => warn!("Job {} went back in time from timestamp {} to {}",
-                                                               job.name, old_timestamp, new_timestamp)
-                                }
-                            },
-                            None => ()
-                        }
+            .for_each(|job| match job.last_build.result {
+                None => {
+                    info!(
+                        "Job {} has a new build, but it is not complete yet",
+                        job.name
+                    );
+                    ()
+                }
+                Some(result) => {
+                    let new_timestamp = job.last_build.timestamp;
+                    match self
+                        .most_recent
+                        .insert((j_config.server.clone(), job.name.clone()), new_timestamp)
+                    {
+                        Some(old_timestamp) => match old_timestamp.cmp(&new_timestamp) {
+                            Ordering::Less => {
+                                info!("Job {} has a new build", job.name);
+                                events.push(Event::UpdatedJob(
+                                    j_config.server.clone(),
+                                    job.name.clone(),
+                                    result.clone(),
+                                    j_config.notify.clone(),
+                                ));
+                            }
+                            Ordering::Equal => info!("Job {} was not updated", job.name),
+                            Ordering::Greater => warn!(
+                                "Job {} went back in time from timestamp {} to {}",
+                                job.name, old_timestamp, new_timestamp
+                            ),
+                        },
+                        None => (),
                     }
                 }
             });
@@ -148,10 +167,12 @@ impl JListener {
                             info!("Sending event: {:?}", event);
                             self.tx.send(event).unwrap();
                         });
-                    },
+                    }
                     Err(err) => {
-                        error!("Request to {}@{} failed with message {}",
-                               j_config.user, j_config.server, err);
+                        error!(
+                            "Request to {}@{} failed with message {}",
+                            j_config.user, j_config.server, err
+                        );
                     }
                 }
             }
@@ -159,5 +180,4 @@ impl JListener {
             sleep(Duration::from_secs(config.sleep));
         }
     }
-
 }
