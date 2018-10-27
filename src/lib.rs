@@ -9,5 +9,3 @@ extern crate toml;
 pub use carlo::Carlo;
 mod carlo;
 mod config;
-mod irc_listener;
-mod j_listener;

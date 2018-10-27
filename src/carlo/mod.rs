@@ -1,3 +1,6 @@
+mod irc;
+mod jenkins;
+
 use std::time::Instant;
 
 use std::sync::mpsc;
@@ -11,8 +14,8 @@ use irc::proto::message::Message;
 use irc::proto::ChannelExt;
 
 use config::Config;
-use irc_listener::IrcListener;
-use j_listener::{BuildName, JListener};
+use self::irc::IrcListener;
+use self::jenkins::{BuildName, JListener};
 
 #[derive(Debug)]
 pub struct Carlo {
