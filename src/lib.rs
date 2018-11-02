@@ -6,6 +6,10 @@ extern crate reqwest;
 extern crate serde_derive;
 extern crate toml;
 
+#[cfg(test)]
+#[macro_use]
+extern crate proptest;
+
 pub use carlo::Carlo;
 mod carlo;
 mod config;

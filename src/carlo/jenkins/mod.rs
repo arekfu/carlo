@@ -1,5 +1,6 @@
+pub mod cache;
+
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::mpsc::Sender;
 use std::thread::sleep;
@@ -10,28 +11,10 @@ use reqwest::{Client, Error};
 use carlo::Event;
 use config::{Config, JenkinsConfig};
 
-#[derive(Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
-pub struct BuildName(pub String);
-
-impl fmt::Display for BuildName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct BuildTimestamp(pub u64);
+pub struct Number(pub u32);
 
-impl fmt::Display for BuildTimestamp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct BuildNumber(pub u32);
-
-impl fmt::Display for BuildNumber {
+impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -40,14 +23,14 @@ impl fmt::Display for BuildNumber {
 #[derive(Deserialize, Debug, Clone)]
 pub struct JBuild {
     pub result: Option<String>,
-    pub timestamp: BuildTimestamp,
-    pub number: BuildNumber,
+    pub timestamp: cache::Timestamp,
+    pub number: Number,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct JJob {
-    pub name: BuildName,
+    pub name: cache::Name,
     pub last_build: JBuild,
 }
 
@@ -62,21 +45,21 @@ struct JJson {
 #[derive(Debug)]
 pub struct JListener {
     tx: Sender<Event>,
-    most_recent: HashMap<(String, BuildName), BuildTimestamp>,
+    most_recent: cache::Cache,
 }
 
 impl JListener {
     pub fn new(tx: Sender<Event>) -> JListener {
         JListener {
             tx,
-            most_recent: HashMap::new(),
+            most_recent: cache::Cache::new(),
         }
     }
 
     fn attempt(&self, client: &Client, j_config: &JenkinsConfig) -> Result<JJson, Error> {
         info!(
-            "Attempting connection to {} as {}",
-            j_config.server, j_config.user
+            "Attempting connection to \"{}\" ({}) as {}",
+            j_config.id, j_config.server, j_config.user
         );
         let mut response = client
             .get(&j_config.server)
@@ -85,27 +68,18 @@ impl JListener {
         response.json()
     }
 
-    fn prune_builds_except(&mut self, build_keys: &Vec<(&str, &BuildName)>) {
-        info!("Will keep {} builds", build_keys.len());
-        fn in_build_keys(key: &(String, BuildName), build_keys: &Vec<(&str, &BuildName)>) -> bool {
-            build_keys
-                .iter()
-                .any(|build_key| key.0 == build_key.0 && key.1 == *build_key.1)
-        }
-        self.most_recent
-            .retain(|ref key, ref mut _val| in_build_keys(*key, build_keys));
-        info!(
-            "Builds kept after prune_missing_builds(): {}",
-            self.most_recent.len()
-        );
-    }
-
     fn prune_missing_builds(&mut self, job_vec: &Vec<JJob>, j_config: &JenkinsConfig) {
-        let mut build_keys = Vec::new() as Vec<(&str, &BuildName)>;
+        let mut build_names = Vec::new() as Vec<&cache::Name>;
         job_vec
             .iter()
-            .for_each(|ref job| build_keys.push((&j_config.server, &job.name)));
-        self.prune_builds_except(&build_keys);
+            .for_each(|ref job| build_names.push(&job.name));
+        info!(
+            "Will keep {} builds for server {}",
+            build_names.len(),
+            j_config.id
+        );
+        self.most_recent
+            .prune_except(&j_config.server, &build_names);
     }
 
     fn update_builds(&mut self, mut job_vec: Vec<JJob>, j_config: &JenkinsConfig) -> Vec<Event> {
@@ -118,19 +92,18 @@ impl JListener {
                         "Job {} has a new build, but it is not complete yet",
                         job.name
                     );
-                    ()
                 }
                 Some(result) => {
                     let new_timestamp = job.last_build.timestamp;
                     match self
                         .most_recent
-                        .insert((j_config.server.clone(), job.name.clone()), new_timestamp)
+                        .insert(&j_config.server, &job.name, &new_timestamp)
                     {
                         Some(old_timestamp) => match old_timestamp.cmp(&new_timestamp) {
                             Ordering::Less => {
                                 info!("Job {} has a new build", job.name);
                                 events.push(Event::UpdatedJob(
-                                    j_config.server.clone(),
+                                    j_config.id.clone(),
                                     job.name.clone(),
                                     result.clone(),
                                     j_config.notify.clone(),
@@ -169,15 +142,60 @@ impl JListener {
                         });
                     }
                     Err(err) => {
-                        error!(
-                            "Request to {}@{} failed with message {}",
-                            j_config.user, j_config.server, err
-                        );
+                        error!("Request to {} failed with message {}", j_config.id, err);
                     }
                 }
             }
 
             sleep(Duration::from_secs(config.sleep));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cache::tests::{caches, names, timestamps};
+    use super::*;
+    use proptest::prelude::*;
+    use std::sync::mpsc::{channel, Receiver};
+
+    prop_compose! {
+        [pub] fn numbers()(number in any::<u32>()) -> Number {
+            Number(number)
+        }
+    }
+
+    prop_compose! {
+        [pub] fn j_builds()(result in any::<Option<String>>(),
+                     timestamp in timestamps(),
+                     number in numbers()) -> JBuild {
+            JBuild { result, timestamp, number }
+        }
+    }
+
+    prop_compose! {
+        [pub] fn j_jobs()(name in names(),
+                   last_build in j_builds()) -> JJob {
+            JJob { name, last_build }
+        }
+    }
+
+    prop_compose! {
+        fn j_job_vecs()(job_vec in prop::collection::vec(j_jobs(), 1..50)) -> JJobVec {
+            JJobVec(job_vec)
+        }
+    }
+
+    prop_compose! {
+        fn j_jsons()(jobs in j_job_vecs()) -> JJson {
+            JJson{ jobs }
+        }
+    }
+
+    prop_compose! {
+        [pub] fn j_listeners()(most_recent in caches(1, 5, 1, 10)) -> (JListener, Receiver<Event>) {
+            let (tx, rx) = channel();
+            (JListener { tx, most_recent }, rx)
         }
     }
 }

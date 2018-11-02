@@ -13,9 +13,10 @@ use irc::client::prelude::{Client, ClientExt, Command, IrcClient};
 use irc::proto::message::Message;
 use irc::proto::ChannelExt;
 
-use config::Config;
 use self::irc::IrcListener;
-use self::jenkins::{BuildName, JListener};
+use self::jenkins::cache::Name;
+use self::jenkins::JListener;
+use config::Config;
 
 #[derive(Debug)]
 pub struct Carlo {
@@ -27,7 +28,7 @@ pub struct Carlo {
 #[derive(Debug)]
 pub enum Event {
     IncomingIrcMessage(Message),
-    UpdatedJob(String, BuildName, String, Vec<String>),
+    UpdatedJob(String, Name, String, Vec<String>),
 }
 
 impl Carlo {
@@ -99,7 +100,7 @@ impl Carlo {
     fn handle_updated_job(
         &self,
         server: String,
-        name: BuildName,
+        name: Name,
         result: String,
         mut notify: Vec<String>,
     ) -> Vec<Message> {

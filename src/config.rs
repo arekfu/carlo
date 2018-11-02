@@ -11,6 +11,7 @@ pub struct Config {
 #[derive(Deserialize, Debug)]
 pub struct JenkinsConfig {
     pub server: String,
+    pub id: String,
     pub user: String,
     pub token: String,
     pub notify: Vec<String>,
