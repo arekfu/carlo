@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
-pub struct Name(pub String);
+pub struct Name(String);
 
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -11,7 +11,7 @@ impl fmt::Display for Name {
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Timestamp(pub u64);
+pub struct Timestamp(u64);
 
 impl fmt::Display for Timestamp {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
