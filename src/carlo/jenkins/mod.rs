@@ -95,6 +95,7 @@ impl JListener {
                 }
                 Some(result) => {
                     let new_timestamp = job.last_build.timestamp;
+                    let number = job.last_build.number;
                     match self
                         .most_recent
                         .insert(&j_config.server, &job.name, &new_timestamp)
@@ -106,6 +107,7 @@ impl JListener {
                                     j_config.id.clone(),
                                     job.name.clone(),
                                     result.clone(),
+                                    number.0,
                                     j_config.notify.clone(),
                                 ));
                             }

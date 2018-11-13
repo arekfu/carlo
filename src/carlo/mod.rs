@@ -28,7 +28,7 @@ pub struct Carlo {
 #[derive(Debug)]
 pub enum Event {
     IncomingIrcMessage(Message),
-    UpdatedJob(String, Name, String, Vec<String>),
+    UpdatedJob(String, Name, String, u32, Vec<String>),
 }
 
 impl Carlo {
@@ -74,8 +74,8 @@ impl Carlo {
         debug!("Handling event {:?}", event);
         match event {
             Event::IncomingIrcMessage(message) => self.handle_irc(message),
-            Event::UpdatedJob(server, name, result, notify) => {
-                self.handle_updated_job(server, name, result, notify)
+            Event::UpdatedJob(server, name, result, number, notify) => {
+                self.handle_updated_job(server, name, result, number, notify)
             }
         }
     }
@@ -102,18 +102,19 @@ impl Carlo {
         server: String,
         name: Name,
         result: String,
+        number: u32,
         mut notify: Vec<String>,
     ) -> Vec<Message> {
         debug!(
-            "Handling Job update {:?}:{:?}:{:?}:{:?}",
-            server, name, result, notify
+            "Handling Job update {:?}:{:?}:{:?}:{:?}:{:?}",
+            server, name, result, number, notify
         );
         notify
             .drain(..)
             .map(|dest| {
                 let reply = format!(
-                    "New build for job '{}' on '{}'! Result: {}",
-                    name, server, result
+                    "Build #{} for job '{}' on '{}'! Result: {}",
+                    number, name, server, result
                 );
                 let cmd = Command::PRIVMSG(dest, reply);
                 Message::from(cmd)
