@@ -12,9 +12,27 @@ use carlo::Event;
 use config::{Config, JenkinsConfig};
 
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Number(pub u32);
+pub struct BuildNumber(pub u32);
 
-impl fmt::Display for Number {
+impl fmt::Display for BuildNumber {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct BuildDuration(pub u32);
+
+impl fmt::Display for BuildDuration {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} s", self.0 / 1000)
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub struct BuildUrl(String);
+
+impl fmt::Display for BuildUrl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -24,7 +42,9 @@ impl fmt::Display for Number {
 pub struct JBuild {
     pub result: Option<String>,
     pub timestamp: cache::Timestamp,
-    pub number: Number,
+    pub number: BuildNumber,
+    pub duration: BuildDuration,
+    pub url: BuildUrl,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -95,7 +115,6 @@ impl JListener {
                 }
                 Some(result) => {
                     let new_timestamp = job.last_build.timestamp;
-                    let number = job.last_build.number;
                     match self
                         .most_recent
                         .insert(&j_config.server, &job.name, &new_timestamp)
@@ -107,7 +126,9 @@ impl JListener {
                                     j_config.id.clone(),
                                     job.name.clone(),
                                     result.clone(),
-                                    number.0,
+                                    job.last_build.number,
+                                    job.last_build.duration,
+                                    job.last_build.url.clone(),
                                     j_config.notify.clone(),
                                 ));
                             }
@@ -162,16 +183,31 @@ mod tests {
     use std::sync::mpsc::{channel, Receiver};
 
     prop_compose! {
-        [pub] fn numbers()(number in any::<u32>()) -> Number {
-            Number(number)
+        [pub] fn build_numbers()(number in any::<u32>()) -> BuildNumber {
+            BuildNumber(number)
+        }
+    }
+
+    prop_compose! {
+        [pub] fn build_durations()(duration in any::<u32>()) -> BuildDuration {
+            BuildDuration(duration)
+        }
+    }
+
+    prop_compose! {
+        [pub] fn build_urls()(url in any::<String>()) -> BuildUrl {
+            BuildUrl(url)
         }
     }
 
     prop_compose! {
         [pub] fn j_builds()(result in any::<Option<String>>(),
                      timestamp in timestamps(),
-                     number in numbers()) -> JBuild {
-            JBuild { result, timestamp, number }
+                     number in build_numbers(),
+                     duration in build_durations(),
+                     url in build_urls(),
+                     ) -> JBuild {
+            JBuild { result, timestamp, number, duration, url }
         }
     }
 

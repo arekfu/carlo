@@ -51,7 +51,10 @@ impl Cache {
         }
         let sub_cache = self.cache.entry(server.clone()).or_insert(HashMap::new());
         sub_cache.retain(|ref name, ref mut _val| in_build_names(*name, build_names));
-        info!("Builds kept after prune_builds_except(): {}", sub_cache.len());
+        info!(
+            "Builds kept after prune_builds_except(): {}",
+            sub_cache.len()
+        );
     }
 }
 
@@ -91,10 +94,9 @@ pub mod tests {
     /// Count the number of names in each subcache and return them as a new hashmap
     fn count_sizes(cache: &Cache) -> HashMap<ServerID, usize> {
         let mut counts = HashMap::new();
-        cache.cache.iter().for_each(
-            |(server, subcache)| {
-                counts.insert(server.clone(), subcache.len());
-            });
+        cache.cache.iter().for_each(|(server, subcache)| {
+            counts.insert(server.clone(), subcache.len());
+        });
         counts
     }
 

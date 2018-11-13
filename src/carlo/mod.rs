@@ -15,7 +15,7 @@ use irc::proto::ChannelExt;
 
 use self::irc::IrcListener;
 use self::jenkins::cache::Name;
-use self::jenkins::JListener;
+use self::jenkins::{BuildDuration, BuildNumber, BuildUrl, JListener};
 use config::Config;
 
 #[derive(Debug)]
@@ -28,7 +28,15 @@ pub struct Carlo {
 #[derive(Debug)]
 pub enum Event {
     IncomingIrcMessage(Message),
-    UpdatedJob(String, Name, String, u32, Vec<String>),
+    UpdatedJob(
+        String,
+        Name,
+        String,
+        BuildNumber,
+        BuildDuration,
+        BuildUrl,
+        Vec<String>,
+    ),
 }
 
 impl Carlo {
@@ -74,8 +82,8 @@ impl Carlo {
         debug!("Handling event {:?}", event);
         match event {
             Event::IncomingIrcMessage(message) => self.handle_irc(message),
-            Event::UpdatedJob(server, name, result, number, notify) => {
-                self.handle_updated_job(server, name, result, number, notify)
+            Event::UpdatedJob(server, name, result, number, duration, url, notify) => {
+                self.handle_updated_job(server, name, result, number, duration, url, notify)
             }
         }
     }
@@ -102,20 +110,29 @@ impl Carlo {
         server: String,
         name: Name,
         result: String,
-        number: u32,
+        number: BuildNumber,
+        duration: BuildDuration,
+        url: BuildUrl,
         mut notify: Vec<String>,
     ) -> Vec<Message> {
         debug!(
-            "Handling Job update {:?}:{:?}:{:?}:{:?}:{:?}",
-            server, name, result, number, notify
+            "Handling Job update {:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
+            server, name, result, number, duration, url, notify
         );
         notify
             .drain(..)
             .map(|dest| {
-                let reply = format!(
-                    "Build #{} for job '{}' on '{}'! Result: {}",
-                    number, name, server, result
-                );
+                let reply = if result == "SUCCESS" {
+                    format!(
+                        "Build #{} for job '{}' on '{}'! Result: {}",
+                        number, name, server, result
+                    )
+                } else {
+                    format!(
+                        "Build #{} for job '{}' on '{}'! Result: {}, URL: {}",
+                        number, name, server, result, url
+                    )
+                };
                 let cmd = Command::PRIVMSG(dest, reply);
                 Message::from(cmd)
             }).collect()
