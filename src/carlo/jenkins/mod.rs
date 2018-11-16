@@ -138,7 +138,18 @@ impl JListener {
                                 job.name, old_timestamp, new_timestamp
                             ),
                         },
-                        None => (),
+                        None => {
+                            info!("Job {} has a new build", job.name);
+                            events.push(Event::UpdatedJob(
+                                    j_config.id.clone(),
+                                    job.name.clone(),
+                                    result.clone(),
+                                    job.last_build.number,
+                                    job.last_build.duration,
+                                    job.last_build.url.clone(),
+                                    j_config.notify.clone(),
+                                    ));
+                        }
                     }
                 }
             });
@@ -153,25 +164,32 @@ impl JListener {
 
     pub fn listen(&mut self, config: Config) {
         let client = Client::new();
+        // update once at the beginning without sending any messages
+        self.update_cache(&client, &config);
         loop {
-            for j_config in config.job.iter() {
-                match self.attempt(&client, &j_config) {
+            sleep(Duration::from_secs(config.sleep));
+            let mut events = self.update_cache(&client, &config);
+            events.drain(..).for_each(|event| {
+                info!("Sending event: {:?}", event);
+                self.tx.send(event).unwrap();
+            });
+        }
+    }
+
+    fn update_cache(&mut self, client: &Client, config: &Config) -> Vec<Event> {
+        config.job.iter()
+            .flat_map(|j_config| {
+                match self.attempt(client, &j_config) {
                     Ok(json) => {
                         let job_vec = json.jobs.0;
-                        let mut events = self.update(job_vec, &j_config);
-                        events.drain(..).for_each(|event| {
-                            info!("Sending event: {:?}", event);
-                            self.tx.send(event).unwrap();
-                        });
+                        self.update(job_vec, &j_config)
                     }
                     Err(err) => {
                         error!("Request to {} failed with message {}", j_config.id, err);
+                        Vec::new()
                     }
                 }
-            }
-
-            sleep(Duration::from_secs(config.sleep));
-        }
+            }).collect()
     }
 }
 
