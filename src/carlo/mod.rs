@@ -69,13 +69,14 @@ impl Carlo {
         }
 
         rx.iter().for_each(|event| {
-            let mut messages = self.handle(event);
-            messages.drain(..).for_each(|message| {
+            self.handle(event).into_iter().for_each(|message| {
                 info!("Sending {}", message);
                 self.client.send(message).unwrap();
             });
         });
-        handles.drain(..).for_each(|handle| handle.join().unwrap());
+        handles
+            .into_iter()
+            .for_each(|handle| handle.join().unwrap());
     }
 
     fn handle(&self, event: Event) -> Vec<Message> {
@@ -113,14 +114,14 @@ impl Carlo {
         number: BuildNumber,
         duration: BuildDuration,
         url: BuildUrl,
-        mut notify: Vec<String>,
+        notify: Vec<String>,
     ) -> Vec<Message> {
         debug!(
             "Handling Job update {:?}:{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
             server, name, result, number, duration, url, notify
         );
         notify
-            .drain(..)
+            .into_iter()
             .map(|dest| {
                 let reply = if result == "SUCCESS" {
                     format!(

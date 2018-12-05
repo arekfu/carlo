@@ -102,10 +102,10 @@ impl JListener {
             .prune_except(&j_config.server, &build_names);
     }
 
-    fn update_builds(&mut self, mut job_vec: Vec<JJob>, j_config: &JenkinsConfig) -> Vec<Event> {
+    fn update_builds(&mut self, job_vec: Vec<JJob>, j_config: &JenkinsConfig) -> Vec<Event> {
         let mut events = Vec::new();
         job_vec
-            .drain(..)
+            .into_iter()
             .for_each(|job| match job.last_build.result {
                 None => {
                     info!(
@@ -141,14 +141,14 @@ impl JListener {
                         None => {
                             info!("Job {} has a new build", job.name);
                             events.push(Event::UpdatedJob(
-                                    j_config.id.clone(),
-                                    job.name.clone(),
-                                    result.clone(),
-                                    job.last_build.number,
-                                    job.last_build.duration,
-                                    job.last_build.url.clone(),
-                                    j_config.notify.clone(),
-                                    ));
+                                j_config.id.clone(),
+                                job.name.clone(),
+                                result.clone(),
+                                job.last_build.number,
+                                job.last_build.duration,
+                                job.last_build.url.clone(),
+                                j_config.notify.clone(),
+                            ));
                         }
                     }
                 }
@@ -168,26 +168,27 @@ impl JListener {
         self.update_cache(&client, &config);
         loop {
             sleep(Duration::from_secs(config.sleep));
-            let mut events = self.update_cache(&client, &config);
-            events.drain(..).for_each(|event| {
-                info!("Sending event: {:?}", event);
-                self.tx.send(event).unwrap();
-            });
+            self.update_cache(&client, &config)
+                .into_iter()
+                .for_each(|event| {
+                    info!("Sending event: {:?}", event);
+                    self.tx.send(event).unwrap();
+                });
         }
     }
 
     fn update_cache(&mut self, client: &Client, config: &Config) -> Vec<Event> {
-        config.job.iter()
-            .flat_map(|j_config| {
-                match self.attempt(client, &j_config) {
-                    Ok(json) => {
-                        let job_vec = json.jobs.0;
-                        self.update(job_vec, &j_config)
-                    }
-                    Err(err) => {
-                        error!("Request to {} failed with message {}", j_config.id, err);
-                        Vec::new()
-                    }
+        config
+            .job
+            .iter()
+            .flat_map(|j_config| match self.attempt(client, &j_config) {
+                Ok(json) => {
+                    let job_vec = json.jobs.0;
+                    self.update(job_vec, &j_config)
+                }
+                Err(err) => {
+                    error!("Request to {} failed with message {}", j_config.id, err);
+                    Vec::new()
                 }
             }).collect()
     }
