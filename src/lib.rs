@@ -10,6 +10,6 @@ extern crate toml;
 #[macro_use]
 extern crate proptest;
 
-pub use carlo::Carlo;
+pub use crate::carlo::Carlo;
 mod carlo;
 mod config;

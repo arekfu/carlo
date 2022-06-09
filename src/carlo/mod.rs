@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use std::thread;
 
-use irc::client::prelude::{Client, ClientExt, Command, IrcClient};
-use irc::proto::message::Message;
-use irc::proto::ChannelExt;
+use ::irc::client::prelude::{Client, ClientExt, Command, IrcClient};
+use ::irc::proto::message::Message;
+use ::irc::proto::ChannelExt;
 
 use self::irc::IrcListener;
 use self::jenkins::cache::Name;
 use self::jenkins::{BuildDuration, BuildNumber, BuildUrl, JListener};
-use config::Config;
+use crate::config::Config;
 
 #[derive(Debug)]
 pub struct Carlo {

@@ -2,7 +2,7 @@ use irc::client::prelude::{Client, IrcClient};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
-use carlo::Event;
+use crate::carlo::Event;
 
 #[derive(Debug)]
 pub struct IrcListener {

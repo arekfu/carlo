@@ -6,10 +6,11 @@ use std::sync::mpsc::Sender;
 use std::thread::sleep;
 use std::time::Duration;
 
-use reqwest::{Client, Error};
+use reqwest::Error;
+use reqwest::blocking::Client;
 
-use carlo::Event;
-use config::{Config, JenkinsConfig};
+use crate::carlo::Event;
+use crate::config::{Config, JenkinsConfig};
 
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct BuildNumber(pub u32);
@@ -81,7 +82,7 @@ impl JListener {
             "Attempting connection to \"{}\" ({}) as {}",
             j_config.id, j_config.server, j_config.user
         );
-        let mut response = client
+        let response = client
             .get(&j_config.server)
             .basic_auth(&j_config.user, Some(&j_config.token))
             .send()?;
