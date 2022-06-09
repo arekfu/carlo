@@ -94,7 +94,7 @@ impl Carlo {
         let cmd_prefix = self.client.current_nickname().to_string();
         match &message.command {
             Command::PRIVMSG(channel, msg) => {
-                if !channel.is_channel_name() || msg.trim_left().starts_with(&cmd_prefix) {
+                if !channel.is_channel_name() || msg.trim_start().starts_with(&cmd_prefix) {
                     let reply_to = message.response_target().unwrap().to_string();
                     let source_nick = message.source_nickname().unwrap_or("");
                     self.process_msg(&source_nick, &reply_to, &msg)
